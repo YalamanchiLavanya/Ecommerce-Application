@@ -52,6 +52,43 @@ class AuthQueries:
                     INTERVAL 9 MINUTE)""",(code_hash,user_id),)
                 saved = cursor.rowcount == 1
                 connection.commit()
-                return saved        
-    
+                return saved 
 
+    @staticmethod
+    #Email OTP Verification after Registration
+    # #Finds an elible user
+    # Locks the user row during the verification
+    # Compares the hashes
+    # #saves the result
+    def verifyCode(user_id,code_hash):
+        with DatabaseConnection()as connection:
+            with connection.cursor(dictionary=True) as cursor:
+                cursor.execute(
+                    """SELECT OTP_HASH AS otp_hash FROM USERS
+                    WHERE USER_ID = %S AND ROLE = 'USER'
+                    AND IS_ACTIVE = TRUE
+                    AND IS_VERIFIED = FALSE
+                    AND OTP_EXPIRES_AT > UTC_TIMESTAMP()
+                    AND OTP_ATTEMPTS < 5 FOR UPDATE"""
+                )
+                pending_user = cursor.fetchone()
+                if pending_user is None:
+                    return False
+                verified = compare_digest(pending_user['otp_hash'],code_hash)
+
+                if verified:
+                    cursor.execute(
+                        """UPDATE USERS SET IS_VERIFIED = TRUE,
+                        OTP_HASH = NULL,
+                        OTP_EXPIERS_AT=NULL,
+                        OTP_ATTEMPT=0
+                        WHERE USER_ID = %S""",(user_id,),
+                    )
+                else:
+                    cursor.execute(
+                        """UPDATE USERS SET OTP_ATTEMPTS = 
+                        OTP_ATTEMPTS+1
+                        WHERE USER_ID = %s""",(user_id,),
+                    ) 
+                connection.commit()
+                return verified       
